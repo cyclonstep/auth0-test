@@ -3,9 +3,9 @@
 
 from functools import wraps
 import json
+import requests
 from os import environ as env
 from six.moves.urllib.request import urlopen
-
 from dotenv import load_dotenv, find_dotenv
 from flask import Flask, request, jsonify, _request_ctx_stack
 from flask_cors import cross_origin
@@ -15,7 +15,9 @@ ENV_FILE = find_dotenv()
 if ENV_FILE:
     load_dotenv(ENV_FILE)
 AUTH0_DOMAIN = env.get("AUTH0_DOMAIN")
+print(AUTH0_DOMAIN)
 API_IDENTIFIER = env.get("API_IDENTIFIER")
+print(API_IDENTIFIER)
 ALGORITHMS = ["RS256"]
 APP = Flask(__name__)
 
@@ -70,6 +72,8 @@ def requires_scope(required_scope):
     """
     token = get_token_auth_header()
     unverified_claims = jwt.get_unverified_claims(token)
+    # print(unverified_claims)
+    print(required_scope)
     if unverified_claims.get("scope"):
         token_scopes = unverified_claims["scope"].split()
         for token_scope in token_scopes:
@@ -166,14 +170,95 @@ def private():
 def private_scoped():
     """A valid access token and an appropriate scope are required to access this route
     """
-    if requires_scope("read:messages"):
-        response = "Hello from a private endpoint! You need to be authenticated and have a scope of read:messages to see this."
+    if requires_scope("read:users"):
+        response = "Hello from a private endpoint! You need to be authenticated and have a scope of read:users to see this."
         return jsonify(message=response)
     raise AuthError({
         "code": "Unauthorized",
         "description": "You don't have access to this resource"
     }, 403)
 
+@APP.route("/api/register-machine-client", methods=['GET', 'POST'])
+@cross_origin(headers=["Content-Type", "application/json"])
+@cross_origin(headers=["Access-Control-Allow-Origin", "http://localhost:3010"])
+@requires_auth
+def register_apps():
+    if request.method == 'POST':
+        # get value from request
+        data = request.get_json()
+        # print(data)
+        client_name = data.get('client_name')
+        redirect_uris = data.get("redirect_uris")
+
+        # print(client_name)
+        # print(redirect_uris)
+
+        if client_name is None or redirect_uris is None:
+            response = "please insert client name or redirect uris"
+            return jsonify(message=response)
+
+        #define params
+        url = "https://"+AUTH0_DOMAIN+"/api/v2/clients"
+
+        headers = {
+            "Content-type" : "application/json"
+        }
+
+        # payload = {
+        #     "client_name" : client_name,
+        #     "redirect_uris" : [redirect_uris]
+        # }
+
+        payload = {
+            "name" : client_name,
+            "description" : "",
+            "logo_uri": "",
+            "callbacks": [redirect_uris],
+            
+        }
+    
+        # send request to auth
+        res = requests.post(url, json.dumps(payload), headers=headers)
+        print(res.status_code)
+        response = res.json()
+
+        if (res.status_code == 201):
+            url = "https://presteniko.auth0.com/oauth/token"
+            authcode = request.headers.get('Authorization')
+            print(authcode)
+            
+            headers = {
+                "Authorization": authcode
+            }
+
+            payload = {
+                "client_id": response.get("client_id"),
+                "audience": API_IDENTIFIER,
+                "scope": ["read:client_grants", "read:users"]
+            }
+
+            res = requests.post(url, json.dumps(payload), headers=headers)
+            print(res.content)
+            return jsonify(message=response)
+        else:
+            response = "error"
+            return jsonify(message=response)
+    else:
+        response = "Please use another method."
+        return jsonify(message= response)
+
+@APP.route("/api/authorize-machine-client", methods=['GET', 'POST'])
+@cross_origin(headers=["Content-Type", "application/json"])
+@cross_origin(headers=["Access-Control-Allow-Origin", "http://localhost:3010"])
+@requires_auth
+def authorize_apps():
+    if request.method == 'POST':
+        # get data value from request
+        data = request.get_json()
+
+    else:
+        response = "Please use another method."
+        return jsonify(message= response)
 
 if __name__ == "__main__":
     APP.run(host="0.0.0.0", port=env.get("PORT", 3010))
